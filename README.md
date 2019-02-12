@@ -41,7 +41,7 @@ In the example above, `memory` is one of the many available cgroup subsystems an
 When Garden creates containers it makes sure that container processes are running in properly configured cgroups in the format `/sys/fs/cgroup/<subsystem>/garden/<container-id>/`. But when we listed the cgroup paths for the errant container here is what we got:
 
 ```
-# cat /proc/<garden-init-pid>/cgroup
+$ cat /proc/<garden-init-pid>/cgroup
 
 12:blkio:/                                                         # <- wrong
 11:hugetlb:/garden/<container-id>
@@ -59,7 +59,7 @@ When Garden creates containers it makes sure that container processes are runnin
 Half of the cgroup paths look all right since they are properly nested under the garden cgroup, but the other half look wrong. Most notably the devices cgroup seems to be messed up. A quick check of the container's `state.json` revealed that runc does not suspect that the container's cgroups got altered:
 
 ```
-cat /run/containerd/runc/garden/<container-id>/state.json
+$ cat /run/containerd/runc/garden/<container-id>/state.json
 
 ...
   "cgroups": {
@@ -70,7 +70,7 @@ cat /run/containerd/runc/garden/<container-id>/state.json
 
 ```
 
-What's more - we observed that `/sys/fs/cgroup/devices/system.slice/runit.service/garden/<container-id>/` was an existing directory and its `cgroup.procs` file was empty. Instead, the pid of the container init process was found in `/sys/fs/cgroup/devices/system.slice/runit.service/cgroup.procs` along with many other pids such as the pid of the Garden daemon. It seemed as if someone moved the container init process upwards in the cgroup hierarchy. At least for some of the subsystems. This observation explained why the container could not be killed. When runc tried to kill it with `runc kill --all` it loaded all pids from the associated devices cgroup, which according to its state file was `/sys/fs/cgroup/devices/system.slice/runit.service/garden/<container-id>/`, found no pids there so the kill was a noop. Containerd, not suspecting what had happened, just hung waiting for the process to exit. When we killed the errant container ungracefully with SIGKILL everything unblocked. But who is it that corrupts container cgroups? And what can we do about it?
+What's more - we observed that `/sys/fs/cgroup/devices/system.slice/runit.service/garden/<container-id>/` was an existing directory and its `cgroup.procs` file was empty. Instead, the pid of the container init process was found in `/sys/fs/cgroup/devices/system.slice/runit.service/cgroup.procs` along with many other pids such as the pid of the Garden daemon. It seemed as if someone moved the container init process upwards in the cgroup hierarchy. At least for some of the subsystems. This observation explained why the container could not be killed. When runc tried to kill it with `runc kill --all` it loaded all pids from the associated devices cgroup, which according to its state file was `/sys/fs/cgroup/devices/system.slice/runit.service/garden/<container-id>/`, found no pids there so the kill was a noop. Containerd, not suspecting what had happened, just hung waiting for the process to exit. When we killed the errant container ungracefully with SIGKILL everything unblocked. But who was it that corrupted container cgroups? And what could we do about it?
 
 ## Great, lets reproduce!
 
@@ -158,7 +158,7 @@ Some googling around systemd and cgroups quickly revealed that other container r
 We still hadn't ruled containerd out of the equation. We had only seen this problem on systems running in containerd mode and the problem surfaced shortly after we made containerd mode the default. So containerd should have something to do with it. In order to prove that we created a deployment with containerd mode switched off and performed our reproduction steps. After running the temp files cleanup we checked the app's cgroups and they looked like this:
 
 ```
-# cat /proc/<garden-init-pid>/cgroup
+$ cat /proc/<garden-init-pid>/cgroup
 
 12:blkio:/                                                         # <- wrong
 11:hugetlb:/garden/<container-id>
